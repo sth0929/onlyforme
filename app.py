@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -58,22 +59,179 @@ if "trade_count" not in st.session_state:
     st.session_state.trade_count = 0
 if "hlines" not in st.session_state:
     st.session_state.hlines = []
-if "hline_mode" not in st.session_state:
-    st.session_state.hline_mode = False
+
+HLINE_COLORS = {"지지선": "dodgerblue", "저항선": "tomato", "기타": "gold"}
 
 # =====================
 # 사이드바
 # =====================
 with st.sidebar:
+    # ── 매매 설정 ──
     st.subheader("⚙️ 매매 설정")
     leverage = st.radio("레버리지", [1, 5, 10, 20, 50], index=3)
     position_ratio = st.radio("진입 비중 (%)", [5, 10, 20], index=0)
 
     st.markdown("---")
+
+    # ── 수평선 그리기 ──
+    st.subheader("📏 수평선 그리기")
+
+    # 데이터 슬라이싱을 사이드바보다 먼저 해야 current_price 사용 가능
+    # → 임시로 session_state에서 마지막 가격 참조
+    _last_price = float(round(
+        st.session_state.df_chart.iloc[
+            st.session_state.start_idx + st.session_state.current_step - 1
+        ]["close"], 2
+    ))
+
+    hl_price = st.number_input(
+        "수평선 가격",
+        value=_last_price,
+        step=100.0,
+        format="%.2f",
+        key="hl_price_input"
+    )
+    hl_label = st.selectbox("종류", ["지지선", "저항선", "기타"], key="hl_label_select")
+
+    hl_c1, hl_c2 = st.columns(2)
+    with hl_c1:
+        if st.button("➕ 추가"):
+            st.session_state.hlines.append({"price": hl_price, "label": hl_label})
+            st.rerun()
+    with hl_c2:
+        if st.button("🗑️ 전체삭제"):
+            st.session_state.hlines = []
+            st.rerun()
+
+    if st.session_state.hlines:
+        with st.expander("📋 목록 / 개별 삭제"):
+            for i, hl in enumerate(st.session_state.hlines):
+                c1, c2 = st.columns([3, 1])
+                with c1:
+                    st.markdown(f"**{hl['label']}** {hl['price']:,.0f}")
+                with c2:
+                    if st.button("❌", key=f"del_hl_{i}"):
+                        st.session_state.hlines.pop(i)
+                        st.rerun()
+
+    st.markdown("---")
+
+    # ── 시장가 주문 ──
+    st.subheader("⚡ 시장가 주문")
+
+    if st.button("📈 LONG", use_container_width=True):
+        if st.session_state.position is None:
+            _cp = st.session_state.df_chart.iloc[
+                st.session_state.start_idx + st.session_state.current_step - 1
+            ]["close"]
+            capital = st.session_state.balance * (position_ratio / 100)
+            st.session_state.entry_capital = capital
+            st.session_state.entry_price = _cp
+            st.session_state.position = "LONG"
+            st.session_state.trade_markers.append({
+                "time": st.session_state.df_chart.index[
+                    st.session_state.start_idx + st.session_state.current_step - 1
+                ],
+                "price": _cp,
+                "label": "LONG",
+                "color": "lime",
+                "symbol": "triangle-up"
+            })
+            st.rerun()
+
+    if st.button("📉 SHORT", use_container_width=True):
+        if st.session_state.position is None:
+            _cp = st.session_state.df_chart.iloc[
+                st.session_state.start_idx + st.session_state.current_step - 1
+            ]["close"]
+            capital = st.session_state.balance * (position_ratio / 100)
+            st.session_state.entry_capital = capital
+            st.session_state.entry_price = _cp
+            st.session_state.position = "SHORT"
+            st.session_state.trade_markers.append({
+                "time": st.session_state.df_chart.index[
+                    st.session_state.start_idx + st.session_state.current_step - 1
+                ],
+                "price": _cp,
+                "label": "SHORT",
+                "color": "red",
+                "symbol": "triangle-down"
+            })
+            st.rerun()
+
+    if st.button("✂️ 부분청산 50%", use_container_width=True):
+        if st.session_state.position:
+            _cp = st.session_state.df_chart.iloc[
+                st.session_state.start_idx + st.session_state.current_step - 1
+            ]["close"]
+            pnl = (
+                (_cp - st.session_state.entry_price)
+                if st.session_state.position == "LONG"
+                else (st.session_state.entry_price - _cp)
+            ) / st.session_state.entry_price * leverage
+            profit = st.session_state.entry_capital * pnl * 0.5
+            st.session_state.balance += profit
+            st.session_state.entry_capital *= 0.5
+            st.session_state.trade_markers.append({
+                "time": st.session_state.df_chart.index[
+                    st.session_state.start_idx + st.session_state.current_step - 1
+                ],
+                "price": _cp,
+                "label": "TP 50%",
+                "color": "orange",
+                "symbol": "circle"
+            })
+            st.rerun()
+
+    if st.button("❌ 전체청산", use_container_width=True):
+        if st.session_state.position:
+            _cp = st.session_state.df_chart.iloc[
+                st.session_state.start_idx + st.session_state.current_step - 1
+            ]["close"]
+            _idx = st.session_state.df_chart.index[
+                st.session_state.start_idx + st.session_state.current_step - 1
+            ]
+            pnl = (
+                (_cp - st.session_state.entry_price)
+                if st.session_state.position == "LONG"
+                else (st.session_state.entry_price - _cp)
+            ) / st.session_state.entry_price * leverage
+            pnl_pct_val = pnl * 100
+            profit = st.session_state.entry_capital * pnl
+            st.session_state.balance += profit
+            st.session_state.total_pnl += profit
+            st.session_state.trade_count += 1
+            if profit > 0:
+                st.session_state.win += 1
+            else:
+                st.session_state.lose += 1
+            pd.DataFrame([{
+                "time": _idx,
+                "direction": st.session_state.position,
+                "entry_price": st.session_state.entry_price,
+                "exit_price": _cp,
+                "leverage": leverage,
+                "position_ratio": position_ratio,
+                "entry_capital": st.session_state.entry_capital,
+                "pnl_dollar": profit,
+                "pnl_pct": pnl_pct_val,
+                "balance_after": st.session_state.balance
+            }]).to_csv(LOG_FILE, mode="a", header=False, index=False)
+            st.session_state.position = None
+            st.session_state.entry_capital = 0
+            st.session_state.entry_price = None
+            st.rerun()
+
+    st.markdown("---")
+
+    # ── 성과 관리 ──
     st.subheader("🧹 성과 관리")
-    if st.button("🔄 성과 전체 리셋"):
+    if st.button("🔄 성과 전체 리셋", use_container_width=True):
         st.session_state.reset_confirm = True
 
+# =====================
+# 리셋 확인
+# =====================
 if st.session_state.get("reset_confirm", False):
     st.warning("⚠️ 모든 성과 데이터가 초기화됩니다. 정말 진행할까요?")
     col_a, col_b = st.columns(2)
@@ -97,6 +255,7 @@ if st.session_state.get("reset_confirm", False):
             ]).to_csv(LOG_FILE, index=False)
             if "performance_loaded" in st.session_state:
                 del st.session_state.performance_loaded
+            st.session_state.reset_confirm = False
             st.success("✅ 성과가 초기화되었습니다.")
             st.rerun()
     with col_b:
@@ -167,44 +326,7 @@ if st.session_state.position:
         st.rerun()
 
 # =====================
-# 수평선 UI (차트 위)
-# =====================
-HLINE_COLORS = {"지지선": "dodgerblue", "저항선": "tomato", "기타": "gold"}
-
-st.markdown("### 📏 수평선 그리기")
-hl_col1, hl_col2, hl_col3, hl_col4 = st.columns([2, 1, 1, 1])
-with hl_col1:
-    hl_price = st.number_input(
-        "수평선 가격 입력",
-        value=float(round(current_price, 2)),
-        step=100.0,
-        format="%.2f",
-        key="hl_price_input"
-    )
-with hl_col2:
-    hl_label = st.selectbox("종류", ["지지선", "저항선", "기타"], key="hl_label_select")
-with hl_col3:
-    if st.button("➕ 수평선 추가"):
-        st.session_state.hlines.append({"price": hl_price, "label": hl_label})
-        st.rerun()
-with hl_col4:
-    if st.button("🗑️ 전체 삭제"):
-        st.session_state.hlines = []
-        st.rerun()
-
-if st.session_state.hlines:
-    with st.expander("📋 수평선 목록 / 개별 삭제"):
-        for i, hl in enumerate(st.session_state.hlines):
-            c1, c2 = st.columns([4, 1])
-            with c1:
-                st.markdown(f"**{hl['label']}** — {hl['price']:,.2f}")
-            with c2:
-                if st.button("❌", key=f"del_hl_{i}"):
-                    st.session_state.hlines.pop(i)
-                    st.rerun()
-
-# =====================
-# 차트 구성 (캔들 + 거래량 통합)
+# 차트
 # =====================
 price_fig = make_subplots(
     rows=2, cols=1,
@@ -213,7 +335,6 @@ price_fig = make_subplots(
     vertical_spacing=0.02
 )
 
-# 캔들차트
 price_fig.add_trace(go.Candlestick(
     x=df_view.index,
     open=df_view["open"],
@@ -223,7 +344,6 @@ price_fig.add_trace(go.Candlestick(
     name="BTC"
 ), row=1, col=1)
 
-# 거래량
 price_fig.add_trace(go.Bar(
     x=df_view.index,
     y=df_view["volume"],
@@ -231,7 +351,6 @@ price_fig.add_trace(go.Bar(
     marker_color="rgba(100,150,255,0.5)"
 ), row=2, col=1)
 
-# 수평선
 for hl in st.session_state.hlines:
     price_fig.add_hline(
         y=hl["price"],
@@ -244,7 +363,6 @@ for hl in st.session_state.hlines:
         row=1, col=1
     )
 
-# 지정가 주문선
 if st.session_state.limit_order:
     lo = st.session_state.limit_order
     color = "lime" if lo["direction"] == "LONG" else "red"
@@ -257,7 +375,6 @@ if st.session_state.limit_order:
         row=1, col=1
     )
 
-# 매매 마커
 for m in st.session_state.trade_markers:
     price_fig.add_trace(go.Scatter(
         x=[m["time"]], y=[m["price"]],
@@ -285,7 +402,6 @@ clicked = st.plotly_chart(
     key="price_chart"
 )
 
-# 차트 클릭으로 수평선 추가
 if clicked and clicked.get("selection") and clicked["selection"].get("points"):
     pt = clicked["selection"]["points"][0]
     clicked_y = pt.get("y")
@@ -294,9 +410,9 @@ if clicked and clicked.get("selection") and clicked["selection"].get("points"):
         st.rerun()
 
 # =====================
-# ✅ Next Candle (차트 바로 아래)
+# Next Candle
 # =====================
-if st.button("➡️ Next Candle"):
+if st.button("➡️ Next Candle", use_container_width=True):
     st.session_state.current_step += 1
     st.rerun()
 
@@ -305,9 +421,6 @@ if st.button("➡️ Next Candle"):
 # =====================
 st.markdown(f"### 💰 Balance: **${st.session_state.balance:.2f}**  |  현재가: **{current_price:,.2f}**  |  포지션: **{st.session_state.position or '없음'}**")
 
-# =====================
-# 포지션 상태
-# =====================
 if st.session_state.position:
     if st.session_state.position == "LONG":
         pnl_pct = (current_price - st.session_state.entry_price) / st.session_state.entry_price * leverage * 100
@@ -322,7 +435,7 @@ if st.session_state.position:
     """)
 
 # =====================
-# 지정가 주문 UI
+# 지정가 주문
 # =====================
 st.markdown("---")
 st.markdown("### 🎯 지정가 주문")
@@ -352,110 +465,19 @@ else:
                 st.warning("포지션 보유 중에는 지정가 주문 불가")
 
 # =====================
-# 시장가 버튼
+# 다른 시간대 차트
 # =====================
 st.markdown("---")
-st.markdown("### ⚡ 시장가 주문")
-
-def enter_position(pos_type):
-    capital = st.session_state.balance * (position_ratio / 100)
-    st.session_state.entry_capital = capital
-    st.session_state.entry_price = current_price
-    st.session_state.position = pos_type
-
-col1, col2, col3, col4, col5 = st.columns(5)
-
-with col1:
-    if st.button("📈 LONG"):
-        if st.session_state.position is None:
-            enter_position("LONG")
-            st.session_state.trade_markers.append({
-                "time": df_view.index[-1],
-                "price": current_price,
-                "label": "LONG",
-                "color": "lime",
-                "symbol": "triangle-up"
-            })
-            st.rerun()
-
-with col2:
-    if st.button("📉 SHORT"):
-        if st.session_state.position is None:
-            enter_position("SHORT")
-            st.session_state.trade_markers.append({
-                "time": df_view.index[-1],
-                "price": current_price,
-                "label": "SHORT",
-                "color": "red",
-                "symbol": "triangle-down"
-            })
-            st.rerun()
-
-with col3:
-    if st.button("✂️ 부분청산 50%"):
-        if st.session_state.position:
-            pnl = (
-                (current_price - st.session_state.entry_price)
-                if st.session_state.position == "LONG"
-                else (st.session_state.entry_price - current_price)
-            ) / st.session_state.entry_price * leverage
-            profit = st.session_state.entry_capital * pnl * 0.5
-            st.session_state.balance += profit
-            st.session_state.entry_capital *= 0.5
-            st.session_state.trade_markers.append({
-                "time": df_view.index[-1],
-                "price": current_price,
-                "label": "TP 50%",
-                "color": "orange",
-                "symbol": "circle"
-            })
-            st.rerun()
-
-with col4:
-    if st.button("❌ 전체청산"):
-        if st.session_state.position:
-            pnl = (
-                (current_price - st.session_state.entry_price)
-                if st.session_state.position == "LONG"
-                else (st.session_state.entry_price - current_price)
-            ) / st.session_state.entry_price * leverage
-            pnl_pct_val = pnl * 100
-            profit = st.session_state.entry_capital * pnl
-            st.session_state.balance += profit
-            st.session_state.total_pnl += profit
-            st.session_state.trade_count += 1
-            if profit > 0:
-                st.session_state.win += 1
-            else:
-                st.session_state.lose += 1
-            pd.DataFrame([{
-                "time": df_view.index[-1],
-                "direction": st.session_state.position,
-                "entry_price": st.session_state.entry_price,
-                "exit_price": current_price,
-                "leverage": leverage,
-                "position_ratio": position_ratio,
-                "entry_capital": st.session_state.entry_capital,
-                "pnl_dollar": profit,
-                "pnl_pct": pnl_pct_val,
-                "balance_after": st.session_state.balance
-            }]).to_csv(LOG_FILE, mode="a", header=False, index=False)
-            st.session_state.position = None
-            st.session_state.entry_capital = 0
-            st.session_state.entry_price = None
-            st.rerun()
-
-with col5:
-    if st.button("🔄 다른 시간대 차트"):
-        st.session_state.df_chart = generate_chart()
-        st.session_state.start_idx = random.randint(0, len(st.session_state.df_chart) - 300)
-        st.session_state.current_step = 300
-        st.session_state.position = None
-        st.session_state.entry_price = None
-        st.session_state.entry_capital = 0
-        st.session_state.trade_markers = []
-        st.session_state.limit_order = None
-        st.rerun()
+if st.button("🔄 다른 시간대 차트", use_container_width=True):
+    st.session_state.df_chart = generate_chart()
+    st.session_state.start_idx = random.randint(0, len(st.session_state.df_chart) - 300)
+    st.session_state.current_step = 300
+    st.session_state.position = None
+    st.session_state.entry_price = None
+    st.session_state.entry_capital = 0
+    st.session_state.trade_markers = []
+    st.session_state.limit_order = None
+    st.rerun()
 
 # =====================
 # 누적 성과
@@ -471,3 +493,4 @@ st.markdown(f"""
 - 누적 손익: **${st.session_state.total_pnl:,.2f}** | 누적 수익률: **{total_return_pct:.2f}%**
 - 현재 잔고: **${st.session_state.balance:,.2f}**
 """)
+```
