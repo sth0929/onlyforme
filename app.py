@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import random
 import os
 
@@ -55,12 +56,8 @@ if "total_pnl" not in st.session_state:
     st.session_state.total_pnl = 0.0
 if "trade_count" not in st.session_state:
     st.session_state.trade_count = 0
-
-# ✅ 수평선 목록 초기화
 if "hlines" not in st.session_state:
-    st.session_state.hlines = []  # [{"price": float, "color": str, "label": str}]
-
-# ✅ 수평선 그리기 모드
+    st.session_state.hlines = []
 if "hline_mode" not in st.session_state:
     st.session_state.hline_mode = False
 
@@ -170,67 +167,12 @@ if st.session_state.position:
         st.rerun()
 
 # =====================
-# 차트 구성
+# 수평선 UI (차트 위)
 # =====================
-price_fig = go.Figure()
-price_fig.add_trace(go.Candlestick(
-    x=df_view.index,
-    open=df_view["open"],
-    high=df_view["high"],
-    low=df_view["low"],
-    close=df_view["close"],
-    name="BTC"
-))
-
-# ✅ 사용자가 그린 수평선
 HLINE_COLORS = {"지지선": "dodgerblue", "저항선": "tomato", "기타": "gold"}
-for hl in st.session_state.hlines:
-    price_fig.add_hline(
-        y=hl["price"],
-        line_dash="dash",
-        line_color=HLINE_COLORS.get(hl["label"], "white"),
-        line_width=1.5,
-        annotation_text=f"{hl['label']} {hl['price']:,.0f}",
-        annotation_font_color=HLINE_COLORS.get(hl["label"], "white"),
-        annotation_font_size=11
-    )
 
-# 지정가 주문선
-if st.session_state.limit_order:
-    lo = st.session_state.limit_order
-    color = "lime" if lo["direction"] == "LONG" else "red"
-    price_fig.add_hline(
-        y=lo["price"],
-        line_dash="dot",
-        line_color=color,
-        annotation_text=f"지정가 {lo['direction']} @ {lo['price']:,.0f}",
-        annotation_font_color=color
-    )
-
-# 매매 마커
-for m in st.session_state.trade_markers:
-    price_fig.add_trace(go.Scatter(
-        x=[m["time"]], y=[m["price"]],
-        mode="markers+text",
-        marker=dict(size=12, color=m["color"], symbol=m["symbol"]),
-        text=[m["label"]], textposition="top center",
-        name=m["label"]
-    ))
-
-price_fig.update_layout(
-    xaxis_rangeslider_visible=False,
-    height=500,
-    dragmode="zoom",  # ✅ pan → zoom 으로 변경
-    newshape=dict(line=dict(color="dodgerblue", width=2)),
-    modebar_add=["drawline", "eraseshape", "pan"]  # ✅ pan도 버튼으로 추가
-)
-
-# =====================
-# ✅ 수평선 그리기 모드 UI
-# =====================
 st.markdown("### 📏 수평선 그리기")
 hl_col1, hl_col2, hl_col3, hl_col4 = st.columns([2, 1, 1, 1])
-
 with hl_col1:
     hl_price = st.number_input(
         "수평선 가격 입력",
@@ -250,7 +192,6 @@ with hl_col4:
         st.session_state.hlines = []
         st.rerun()
 
-# 수평선 개별 삭제
 if st.session_state.hlines:
     with st.expander("📋 수평선 목록 / 개별 삭제"):
         for i, hl in enumerate(st.session_state.hlines):
@@ -263,16 +204,88 @@ if st.session_state.hlines:
                     st.rerun()
 
 # =====================
-# 차트 렌더링 (클릭 이벤트 수신)
+# 차트 구성 (캔들 + 거래량 통합)
 # =====================
+price_fig = make_subplots(
+    rows=2, cols=1,
+    shared_xaxes=True,
+    row_heights=[0.75, 0.25],
+    vertical_spacing=0.02
+)
+
+# 캔들차트
+price_fig.add_trace(go.Candlestick(
+    x=df_view.index,
+    open=df_view["open"],
+    high=df_view["high"],
+    low=df_view["low"],
+    close=df_view["close"],
+    name="BTC"
+), row=1, col=1)
+
+# 거래량
+price_fig.add_trace(go.Bar(
+    x=df_view.index,
+    y=df_view["volume"],
+    name="Volume",
+    marker_color="rgba(100,150,255,0.5)"
+), row=2, col=1)
+
+# 수평선
+for hl in st.session_state.hlines:
+    price_fig.add_hline(
+        y=hl["price"],
+        line_dash="dash",
+        line_color=HLINE_COLORS.get(hl["label"], "white"),
+        line_width=1.5,
+        annotation_text=f"{hl['label']} {hl['price']:,.0f}",
+        annotation_font_color=HLINE_COLORS.get(hl["label"], "white"),
+        annotation_font_size=11,
+        row=1, col=1
+    )
+
+# 지정가 주문선
+if st.session_state.limit_order:
+    lo = st.session_state.limit_order
+    color = "lime" if lo["direction"] == "LONG" else "red"
+    price_fig.add_hline(
+        y=lo["price"],
+        line_dash="dot",
+        line_color=color,
+        annotation_text=f"지정가 {lo['direction']} @ {lo['price']:,.0f}",
+        annotation_font_color=color,
+        row=1, col=1
+    )
+
+# 매매 마커
+for m in st.session_state.trade_markers:
+    price_fig.add_trace(go.Scatter(
+        x=[m["time"]], y=[m["price"]],
+        mode="markers+text",
+        marker=dict(size=12, color=m["color"], symbol=m["symbol"]),
+        text=[m["label"]], textposition="top center",
+        name=m["label"]
+    ), row=1, col=1)
+
+price_fig.update_layout(
+    xaxis_rangeslider_visible=False,
+    height=600,
+    dragmode="zoom",
+    newshape=dict(line=dict(color="dodgerblue", width=2)),
+    modebar_add=["drawline", "eraseshape", "pan"],
+    showlegend=False
+)
+price_fig.update_yaxes(title_text="Price", row=1, col=1)
+price_fig.update_yaxes(title_text="Volume", row=2, col=1)
+
 clicked = st.plotly_chart(
     price_fig,
     use_container_width=True,
-    on_select="rerun",   # ✅ 클릭 시 rerun + 이벤트 반환
+    on_select="rerun",
     key="price_chart"
 )
 
-# ✅ 차트 클릭으로 수평선 추가
+# 차트 클릭으로 수평선 추가
 if clicked and clicked.get("selection") and clicked["selection"].get("points"):
     pt = clicked["selection"]["points"][0]
     clicked_y = pt.get("y")
@@ -281,22 +294,20 @@ if clicked and clicked.get("selection") and clicked["selection"].get("points"):
         st.rerun()
 
 # =====================
-# 거래량 차트
+# ✅ Next Candle (차트 바로 아래)
 # =====================
-volume_fig = go.Figure()
-volume_fig.add_trace(go.Bar(x=df_view.index, y=df_view["volume"], name="Volume"))
-volume_fig.update_layout(height=200, xaxis_title="Time", yaxis_title="Volume")
-st.plotly_chart(volume_fig, use_container_width=True)
+if st.button("➡️ Next Candle"):
+    st.session_state.current_step += 1
+    st.rerun()
 
 # =====================
 # 계좌 정보
 # =====================
 st.markdown(f"### 💰 Balance: **${st.session_state.balance:.2f}**  |  현재가: **{current_price:,.2f}**  |  포지션: **{st.session_state.position or '없음'}**")
 
-if st.button("➡️ Next Candle"):
-    st.session_state.current_step += 1
-    st.rerun()
-
+# =====================
+# 포지션 상태
+# =====================
 if st.session_state.position:
     if st.session_state.position == "LONG":
         pnl_pct = (current_price - st.session_state.entry_price) / st.session_state.entry_price * leverage * 100
@@ -358,14 +369,26 @@ with col1:
     if st.button("📈 LONG"):
         if st.session_state.position is None:
             enter_position("LONG")
-            st.session_state.trade_markers.append({"time": df_view.index[-1], "price": current_price, "label": "LONG", "color": "lime", "symbol": "triangle-up"})
+            st.session_state.trade_markers.append({
+                "time": df_view.index[-1],
+                "price": current_price,
+                "label": "LONG",
+                "color": "lime",
+                "symbol": "triangle-up"
+            })
             st.rerun()
 
 with col2:
     if st.button("📉 SHORT"):
         if st.session_state.position is None:
             enter_position("SHORT")
-            st.session_state.trade_markers.append({"time": df_view.index[-1], "price": current_price, "label": "SHORT", "color": "red", "symbol": "triangle-down"})
+            st.session_state.trade_markers.append({
+                "time": df_view.index[-1],
+                "price": current_price,
+                "label": "SHORT",
+                "color": "red",
+                "symbol": "triangle-down"
+            })
             st.rerun()
 
 with col3:
@@ -379,7 +402,13 @@ with col3:
             profit = st.session_state.entry_capital * pnl * 0.5
             st.session_state.balance += profit
             st.session_state.entry_capital *= 0.5
-            st.session_state.trade_markers.append({"time": df_view.index[-1], "price": current_price, "label": "TP 50%", "color": "orange", "symbol": "circle"})
+            st.session_state.trade_markers.append({
+                "time": df_view.index[-1],
+                "price": current_price,
+                "label": "TP 50%",
+                "color": "orange",
+                "symbol": "circle"
+            })
             st.rerun()
 
 with col4:
