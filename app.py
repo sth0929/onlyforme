@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -493,4 +492,3 @@ st.markdown(f"""
 - 누적 손익: **${st.session_state.total_pnl:,.2f}** | 누적 수익률: **{total_return_pct:.2f}%**
 - 현재 잔고: **${st.session_state.balance:,.2f}**
 """)
-```
