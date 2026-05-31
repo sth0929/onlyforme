@@ -1,3 +1,0 @@
-steamlit
-pandas
-plotly
